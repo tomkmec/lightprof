@@ -1,7 +1,7 @@
 {
   "name": "lightprof",
   "description": "A lightweight profiling tool for node.js",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "homepage": "https://github.com/tomkmec/lightprof",
   "author": {
     "name": "Tom Kmec",
@@ -15,7 +15,14 @@
     "node": ">= 0.8.0"
   },
   "dependencies": {
-    "underscore": "1.4.x"
+    "underscore": "1.4.x",
+    "underscore.string": "2.3.1"
+  },
+  "devDependencies": {
+    "jasmine-node": "1.7.x"
+  },
+  "scripts": {
+    "test": "jasmine-node test/"
   },
   "keywords": [
     "profiling"
