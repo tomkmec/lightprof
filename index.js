@@ -79,37 +79,37 @@ Profiler.prototype.reportTree = function(options) {
 
 	options = _.defaults(options || {}, {
 		timeUnit: 'ms', // s, ms, us, ns
-		format: function(fn, record, timeUnit, fnPadding, level, firstChild, lastChild) {
+		format: function(fn, record, timeUnit, fnPadding, prefix, firstChild, lastChild) {
 			if (!fn) return _.rpad("function", fnPadding+1) + _.lpad("calls", 11)  + _.lpad("total time ["+timeUnit+"]", 20);
  			else {
- 				var ascii = level>0? _.lpad(lastChild?'\u2514':'\u251C', level) : '';
+ 				var ascii = prefix + (lastChild?'\u2514':'\u251C');
  				return _.rpad(ascii+fn, fnPadding) + _.lpad(record.calls, 11) + _.lpad(record.timeTotal, 20);
  			}
 		}
 	});
 
 	var maxFnNameLength = 40; //TODO
-	var printLevel = function(root, level) {
+	var printLevel = function(root, prefix) {
 		return _.chain(root)
 			.pairs()
 			.reject(function(p) {return p[0].indexOf('__')==0})
-			// .sortBy
+			.sortBy(function(p) {return -p[1].__timeTotal})
 			.map(function(p,i,l) {
 				return [options.format(
 					p[0], 
 					{ timeTotal: p[1].__timeTotal/divs[options.timeUnit], calls: p[1].__calls },
 					options.timeUnit, 
 					maxFnNameLength,
-					level,
+					prefix,
 					i==0,
 					i==l.length-1
-				)].concat(printLevel(p[1],level+1)); 
+				)].concat(printLevel(p[1],(prefix+(i==l.length-1?'\u2514':'\u2502').replace('\u2514',' ')))); 
 			})
 			.flatten()
 			.value()
 	}
 
-	return [options.format(false,false, options.timeUnit, maxFnNameLength)].concat(printLevel(this.treelog, 0)).join('\n');
+	return [options.format(false,false, options.timeUnit, maxFnNameLength)].concat(printLevel(this.treelog, '')).join('\n');
 
 }
 
