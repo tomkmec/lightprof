@@ -5,145 +5,172 @@ _.mixin(_.str.exports());
 
 var divs = { ns: 1, us: 1000, ms: 1000000, s: 1000000000 };
 
-var Profiler = module.exports = function Profiler(options) {
-	options = options || {};
-	this.options = _.defaults(options, {
-		instances: [],
-		classes: [],
-		allowStrings: false
-	});
-	this.log = {};
-	this.treelog = {__parent: false};
-	this.instrumented = [];
+var Profiler = module.exports.Profiler = function Profiler(options) {
+  options = options || {};
+  this.options = _.defaults(options, {
+    evalStrings: false, // when true, profiled objects and classes can be passed as Strings to .profile() method and will be evaled
+    startPaused: false
+  });
 }
 
-Profiler.prototype.profile = function(what) {
-	var prof = this;
+Profiler.prototype.profile = function() {
+  this.log = {};
+  this.totalTime = 0;
+  this.treelog = {__parent: false};
+  this.instrumented = [];
+  this._instances = [];
+  this._classes = [];
 
-	if (!_.isUndefined(what)) {
-		if (!_.isArray(what)) what = [what];
-		what.forEach(function (w) {
-			if (prof.options.allowStrings && _.isString(w)) w = eval(w);
-			if(_.isFunction(w) && _.isObject(w.prototype)) prof.options.classes.push(w);
-			if(_.isObject(w)) prof.options.instances.push(w);
-		});
-	}
+  var prof = this;
+  _.chain(arguments).flatten().each(function (w) {
+    if (prof.options.evalStrings && _.isString(w)) w = eval(w);
+    if(_.isFunction(w) && _.isObject(w.prototype)) prof._classes.push(w);
+    if(_.isObject(w)) prof._instances.push(w);
+  });
 
-	_.each(prof.options.instances, prof._measure.bind(prof));
-	_.chain(prof.options.classes).pluck('prototype').each(prof._measure.bind(prof));
-	prof.stack = [];
-	prof.treetop = this.treelog;
+  _.each(prof._instances, prof._measure.bind(prof));
+  _.chain(prof._classes).pluck('prototype').each(prof._measure.bind(prof));
+  
+  this.stack = [];
+  this.treetop = this.treelog;
+  this.running = !this.options.startPaused;
+  this.totalTime = 0;
+  this.startTime = this.running? process.hrtime() : false;
 }
 
 Profiler.prototype.stop = function() {
-	var prof = this;
+  this.running = false;
 
-	this.instrumented.forEach(function(x) {
-		var o = x.orig;
-		o.obj[o.name] = o.fn;
-	})
+	if (this.startTime) {
+		var diff = process.hrtime(this.startTime);
+		this.totalTime += diff[0] * 1e9 + diff[1];
+		this.startTime = false;
+	}
 
-	return prof.log;
+  this.instrumented.forEach(function(x) {
+    var o = x.orig;
+    o.obj[o.name] = o.fn;
+  });
+  this.instrumented = [];
 }
 
-Profiler.prototype.report = function(options) {
+Profiler.prototype.pause = function() {
+	this.running = false;
 
-	options = _.defaults(options || {}, {
-		omitZeroCalls: true,
-		orderBy: 'timeOwn',
-		timeUnit: 'ms', // s, ms, us, ns
-		format: function(fn, record, timeUnit, maxFnNameLength) {
-			if (!fn) return _.rpad("function", maxFnNameLength+1) + _.lpad("calls", 11)  + _.lpad("own time ["+timeUnit+"]", 20) + _.lpad("total time ["+timeUnit+"]", 20);
- 			else return _.rpad(fn, maxFnNameLength+1) + _.lpad(record.calls, 11)  + _.lpad(record.timeOwn, 20) + _.lpad(record.timeTotal, 20);
-		}
-	});
+	if (this.startTime) {
+		var diff = process.hrtime(this.startTime);
+		this.totalTime += diff[0] * 1e9 + diff[1];
+		this.startTime = false;
+	}
+}
 
-  var maxFnNameLength = 40; //TODO
+Profiler.prototype.resume = function() {
+	if (!this.startTime) {
+		this.startTime = process.hrtime();
+	}
 
-	var rows = _.chain(this.log)
-		.pairs()
-		.reject(function(pair) {return options.omitZeroCalls && pair[1].calls == 0; })
-		.sortBy(function(pair) {return -pair[1][options.orderBy]})
-		.map(function(pair) {
-			return options.format(
-				pair[0], 
-				{ timeOwn: pair[1].timeOwn/divs[options.timeUnit], timeTotal: pair[1].timeTotal/divs[options.timeUnit], calls: pair[1].calls }, 
-				options.timeUnit, 
-				maxFnNameLength) 
-		})
-		.value()
-		return [options.format(false,false, options.timeUnit, maxFnNameLength)].concat(rows).join('\n');
+	this.running = true;
+}
+
+Profiler.prototype._measure = function(obj) {
+  var prof = this;
+
+  _.chain(obj).functions().each(function(fn) {
+    var orig = obj[fn];
+    var key = obj.constructor.name+'.'+fn;
+    prof.log[key] = {calls:0, timeTotal:0, timeOwn:0}
+    obj[fn] = function() {
+      prof.stack.push(0);
+      if (!_.has(prof.treetop, key)) prof.treetop[key] = {__calls:0, __timeTotal:0, __parent: prof.treetop}
+      prof.treetop = prof.treetop[key];
+
+      var start = process.hrtime();
+      var r = orig.apply(this, arguments);
+      var diff = process.hrtime(start);
+
+      var innerTime = prof.stack.pop()
+      prof.treetop = prof.treetop.__parent;
+      if (prof.running) {
+	      var totalTime = diff[0] * 1e9 + diff[1];
+
+	      prof.treetop[key].__calls++;  
+	      prof.treetop[key].__timeTotal+=totalTime;  
+	      
+	      prof.log[key].calls++;
+	      prof.log[key].timeTotal+= totalTime;
+	      prof.log[key].timeOwn+= totalTime - innerTime;
+	      if (prof.stack.length>0) prof.stack[prof.stack.length-1]+= totalTime;
+	    }
+      return r;
+    }
+    obj[fn].orig = {obj:obj, name:fn, fn:orig};
+    prof.instrumented.push(obj[fn]);
+  });
+}
+
+
+
+Profiler.prototype.reportPlain = function(options) {
+
+  options = _.defaults(options || {}, {
+    omitZeroCalls: true,
+    orderBy: 'timeOwn',
+    timeUnit: 'ms', // s, ms, us, ns
+    format: function(fn, record, timeUnit) {
+		  var maxFnNameLength = 40; //TODO
+      if (!fn) return _.rpad("function", maxFnNameLength+1) + _.lpad("calls", 11)  + _.lpad("own time ["+timeUnit+"]", 20) + _.lpad("total time ["+timeUnit+"]", 20);
+      else return _.rpad(fn, maxFnNameLength+1) + _.lpad(record.calls, 11)  + _.lpad(record.timeOwn, 20) + _.lpad(record.timeTotal, 20);
+    }
+  });
+
+
+  var rows = _.chain(this.log)
+    .pairs()
+    .reject(function(pair) {return options.omitZeroCalls && pair[1].calls == 0; })
+    .sortBy(function(pair) {return -pair[1][options.orderBy]})
+    .map(function(pair) {
+      return options.format(
+        pair[0], 
+        { timeOwn: pair[1].timeOwn/divs[options.timeUnit], timeTotal: pair[1].timeTotal/divs[options.timeUnit], calls: pair[1].calls }, 
+        options.timeUnit) 
+    })
+    .value()
+    return [options.format(false,false, options.timeUnit)].concat(rows).join('\n');
 }
 
 Profiler.prototype.reportTree = function(options) {
 
-	options = _.defaults(options || {}, {
-		timeUnit: 'ms', // s, ms, us, ns
-		format: function(fn, record, timeUnit, fnPadding, prefix, firstChild, lastChild) {
-			if (!fn) return _.rpad("function", fnPadding+1) + _.lpad("calls", 11)  + _.lpad("total time ["+timeUnit+"]", 20);
- 			else {
- 				var ascii = prefix + (lastChild?'\u2514':'\u251C');
- 				return _.rpad(ascii+fn, fnPadding) + _.lpad(record.calls, 11) + _.lpad(record.timeTotal, 20);
- 			}
-		}
-	});
+  options = _.defaults(options || {}, {
+    timeUnit: 'ms', // s, ms, us, ns
+    format: function(fn, record, timeUnit, prefix, firstChild, lastChild) {
+		  var maxFnNameLength = 40; //TODO
+      if (!fn) return _.rpad("function", maxFnNameLength+1) + _.lpad("calls", 11)  + _.lpad("total time ["+timeUnit+"]", 20);
+      else {
+    	   var ascii = prefix + (lastChild?'\u2514':'\u251C');
+         return _.rpad(ascii+fn, maxFnNameLength) + _.lpad(record.calls, 11) + _.lpad(record.timeTotal, 20);
+       }
+    }
+  });
 
-	var maxFnNameLength = 40; //TODO
-	var printLevel = function(root, prefix) {
-		return _.chain(root)
-			.pairs()
-			.reject(function(p) {return p[0].indexOf('__')==0})
-			.sortBy(function(p) {return -p[1].__timeTotal})
-			.map(function(p,i,l) {
-				return [options.format(
-					p[0], 
-					{ timeTotal: p[1].__timeTotal/divs[options.timeUnit], calls: p[1].__calls },
-					options.timeUnit, 
-					maxFnNameLength,
-					prefix,
-					i==0,
-					i==l.length-1
-				)].concat(printLevel(p[1],(prefix+(i==l.length-1?'\u2514':'\u2502').replace('\u2514',' ')))); 
-			})
-			.flatten()
-			.value()
-	}
+  var printLevel = function(root, prefix) {
+    return _.chain(root)
+      .pairs()
+      .reject(function(p) {return p[0].indexOf('__')==0})
+      .sortBy(function(p) {return -p[1].__timeTotal})
+      .map(function(p,i,l) {
+        return [options.format(
+          p[0], 
+          { timeTotal: p[1].__timeTotal/divs[options.timeUnit], calls: p[1].__calls },
+          options.timeUnit,
+          prefix,
+          i==0,
+          i==l.length-1
+        )].concat(printLevel(p[1],(prefix+(i==l.length-1?'\u2514':'\u2502').replace('\u2514',' ')))); 
+      })
+      .flatten()
+      .value()
+  }
 
-	return [options.format(false,false, options.timeUnit, maxFnNameLength)].concat(printLevel(this.treelog, '')).join('\n');
+  return [options.format(false,false, options.timeUnit)].concat(printLevel(this.treelog, '')).join('\n');
 
-}
-
-Profiler.prototype._measure = function(obj) {
-	var prof = this;
-
-	//TODO check and do something wise when obj is already measured.
-	_.chain(obj).functions().each(function(fn) {
-		var orig = obj[fn];
-		var key = obj.constructor.name+'.'+fn;
-		prof.log[key] = {calls:0, timeTotal:0, timeOwn:0}
-		obj[fn] = function() {
-			prof.stack.push(0);
-			if (!_.has(prof.treetop, key)) prof.treetop[key] = {__calls:0, __timeTotal:0, __parent: prof.treetop}
-			prof.treetop = prof.treetop[key];
-			var start = process.hrtime();
-
-			var r = orig.apply(this, arguments);
-
-			var diff = process.hrtime(start);
-			var innerTime = prof.stack.pop()
-			var totalTime = diff[0] * 1e9 + diff[1];
-
-			prof.treetop = prof.treetop.__parent;
-			prof.treetop[key].__calls++;  
-			prof.treetop[key].__timeTotal+=totalTime;  
-			
-			prof.log[key].calls++;
-			prof.log[key].timeTotal+= totalTime;
-			prof.log[key].timeOwn+= totalTime - innerTime;
-			if (prof.stack.length>0) prof.stack[prof.stack.length-1]+= totalTime;
-			return r;
-		}
-		obj[fn].orig = {obj:obj, name:fn, fn:orig};
-		prof.instrumented.push(obj[fn]);
-	});
 }

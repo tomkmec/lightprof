@@ -1,35 +1,113 @@
-lightprof 0.0
-=============
+lightprof
+=========
 
 A lightweight profiling tool for javascript.
 
-What can I do
---------------
+Impersonates functions in target objects or prototypes, traces execution time and reports results.
 
-Give me some objects, or classes (you know, prototype fuctions, whatever) 
-and I'll record how many times their functions are executed and how slo.. err.. fast they are.
+Doesn't utilize V8 profiler or anything terribly node-specific at its core so browser version should be possible and could appear someday.
 
-How do I work
--------------
+Status
+------
 
-Oh.. well. I just impersonate your precious functions. Simple as it is, this approach has a few implications:
+Early development version. Usable, but anything can change in following versions.
 
-* **Simple to use**. You don't have to be V8 profiling ninja to use this
-* **Invasive**. You have to put my code in your code. If this is too intimate for you, become a V8 profiling ninja.
-* Performance drain. Slightly, depending on your code granurality. But hey, it's profiling. Just don't run it on production environment, ok?
+Example use and output
+----------------------
 
-Simple example
---------------
+Use lightprof like this:
 
-	var Profiler = require('lightprof'),
-	    profiler = new Profiler(); // options will be documented later. Or check the source.
+```javascript
+// import and initialize Profiler
+var Profiler = require('lightprof').Profiler,
+    profiler = new Profiler();
 
-	var something = new Something();
+//something to profile
+var Class = function Class() { ... }
+Class.prototype.method = function() { ... }
+var instance = new SomethingElse();
 
-	profiler.start(something);
+// start profiling 'instance' object and any instances of 'Class' created after this point
+profiler.profile(instance, Class);
 
-	... do your stuff ...
+//... do your stuff ...
 
-	var log = profiler.stop();
-	// -> { "Something.method1": {calls:..., timeOwn:..., timeTotal:...} , ... }
+// stop profiling, replace traced functions with originals
+profiler.stop();
 
+//
+console.log(profiler.reportTree());
+```
+
+To get results like this:
+
+	function                                       calls     total time [ms]
+	├Class.method3                                    2         2015.961540
+	│├Class.method                                    4         1512.021972
+	││└Class.method2                                  4         1439.995954
+	│└Class.method2                                   2          479.940796
+	├Class.method                                     1          315.033041
+	│└Class.method2                                   1          299.979859
+	├Class.method2                                    1          179.981357
+	├SomethingElse.foobar                             1           97.053809
+	│├SomethingElse.bar                               1           48.971801
+	│└SomethingElse.foo                               1           23.983303
+	├SomethingElse.foo                                2           44.518808
+	└SomethingElse.bar                                1           20.926568
+
+Important notes
+---------------
+
+* `profile()` method replaces functions of objects and classes (constructor functions) passed as arguments to it. 
+	Instances of profiled classes which were created before `profile` was called will keep their original functions and will not be profiled.
+* 'class' names in reports are in fact names of constructor functions. You need to have named constructor function to see it 	in report: `var Class = function Class() { ... }` (and not anonymous: `var Class = function() { ... }`)
+
+API
+---
+
+### Profiler constructor options
+
+<table>
+    <tr>
+		<th>Option</th>
+		<th>Type</th>
+		<th>Default</th>
+		<th>Description</th>
+	</tr>
+	<tr>
+		<td><code>evalStrings</code></td>
+		<td>boolean</td>
+		<td><code>false</code></td>
+		<td>When true, objects and classes in `profile()` arguments can be strings and will be evaled in that case</td>
+	</tr>
+	<tr>
+		<td><code>startPaused</code></td>
+		<td>boolean</td>
+		<td><code>false</code></td>
+		<td>When true, `profile()` will start paused (not recording function calls, just tracing call stack)</td>
+	</tr>
+</table>
+
+### .profile( what... )
+
+### .stop()
+
+### .pause()
+
+### .resume()
+
+### .reportPlain()
+
+### .reportTree()
+
+
+What's next
+-----------
+
+* Total profile time in reports
+* Tree report improvements 
+* Events
+* Hotspots reporting
+* Asynchronous
+* Proper tests
+* Browser version?

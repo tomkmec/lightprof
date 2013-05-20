@@ -1,4 +1,4 @@
-var Profiler = require('../index.js');
+var Profiler = require('../index.js').Profiler;
 
 var TestClass1 = function TestClass1(values) { this.values = values;}
 TestClass1.prototype.method1 = function(time) {
@@ -25,14 +25,15 @@ describe("Profiler with default options", function() {
     instance1.method1(20);
     instance1.method2(20);
     // instance2.method1(20);
-    var log = profiler.stop();
+    profiler.stop();
+    var log = profiler.log;
 
     expect(log['TestClass1.method1'].calls).toBe(1);
     expect(log['TestClass1.method2'].calls).toBe(2);
     expect(log['TestClass1.method2'].timeOwn).toEqual(log['TestClass1.method2'].timeTotal);
     expect(log['TestClass1.method1'].timeOwn).toBeLessThan(log['TestClass1.method1'].timeTotal);
 
-    console.log(profiler.report())
+    console.log(profiler.reportPlain())
     console.log(profiler.reportTree())
    });
 
@@ -49,7 +50,8 @@ describe("Profiler with default options", function() {
 
     profiler.profile(instance1);
     var result = instance1.method1.bind(instance2)(20);
-    var log = profiler.stop();
+    profiler.stop();
+    var log = profiler.log;
 
     expect(result).toBe("Bob2");
     expect(log['TestClass1.method1'].calls).toBe(1); // called on instance1 (so it is recorded), but with 'this' pointing to instance2!

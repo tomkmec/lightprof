@@ -1,7 +1,7 @@
 {
   "name": "lightprof",
   "description": "A lightweight profiling tool for node.js",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "homepage": "https://github.com/tomkmec/lightprof",
   "author": {
     "name": "Tom Kmec",
@@ -25,6 +25,6 @@
     "test": "jasmine-node test/"
   },
   "keywords": [
-    "profiling"
+    "profiling", "profiler"
   ]
 }
