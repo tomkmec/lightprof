@@ -9,6 +9,11 @@ TestClass1.prototype.method2 = function(time) {
   _sleep(time);
   return this.values[1];
 }
+TestClass1.prototype.methodWithCallback1 = function(time, callback) {
+  _sleep(time);
+  callback();
+}
+
 
 describe("Profiler with default options", function() {
   var profiler;
@@ -58,6 +63,27 @@ describe("Profiler with default options", function() {
     expect(log['TestClass1.method2'].calls).toBe(0); // called on instance2 and not recorded.
   })
 
+  it("works with callbacks!", function() {
+    var instance;
+    var done=false;
+
+    runs(function(){
+      instance = new TestClass1(["Alice", "1"]);
+      profiler.profile(instance);
+      instance.methodWithCallback1(100, function() {_sleep(100); done=true })
+    })
+
+    waitsFor(function() {return done});
+
+    runs(function() {
+      profiler.stop();
+      var log = profiler.log;
+      console.log(profiler.reportTree());
+      expect(log['TestClass1.methodWithCallback1'].timeTotal).toBeGreaterThan(99*1000000)
+      expect(log['TestClass1.methodWithCallback1'].timeTotal).toBeLessThan(199*1000000)
+    })
+
+  })
 
 });
 

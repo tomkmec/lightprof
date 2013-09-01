@@ -86,6 +86,14 @@ API
 		<td><code>false</code></td>
 		<td>When true, `profile()` will start paused (not recording function calls, just tracing call stack)</td>
 	</tr>
+	<tr>
+		<td><code>treatCallbackAsReturn</code></td>
+		<td>boolean</td>
+		<td><code>true</code></td>
+		<td>
+			When <code>false</code>, a profiled method is considered completed after return.<br>When <code>true</code>, it is considered completed either on return or when callback function is called. Callback is assumed to be the last argument passed to the profiled method (if it is a function)
+		</td>
+	</tr>
 </table>
 
 ### .profile( what... )

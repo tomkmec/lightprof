@@ -9,7 +9,8 @@ var Profiler = module.exports.Profiler = function Profiler(options) {
   options = options || {};
   this.options = _.defaults(options, {
     evalStrings: false, // when true, profiled objects and classes can be passed as Strings to .profile() method and will be evaled
-    startPaused: false
+    startPaused: false,
+    treatCallbackAsReturn: true //suppose a method ends as soon as a callback (last argument of a method call if it is a function) is called.
   });
 }
 
@@ -85,22 +86,36 @@ Profiler.prototype._measure = function(obj) {
       prof.treetop = prof.treetop[key];
 
       var start = process.hrtime();
+      var ended = false;
+      var _end = function() {
+        if (ended) return;
+        ended = true;
+        var diff = process.hrtime(start);
+
+        var innerTime = prof.stack.pop()
+        prof.treetop = prof.treetop.__parent;
+        if (prof.running) {
+          var totalTime = diff[0] * 1e9 + diff[1];
+
+          prof.treetop[key].__calls++;  
+          prof.treetop[key].__timeTotal+=totalTime;  
+          
+          prof.log[key].calls++;
+          prof.log[key].timeTotal+= totalTime;
+          prof.log[key].timeOwn+= totalTime - innerTime;
+          if (prof.stack.length>0) prof.stack[prof.stack.length-1]+= totalTime;
+        }
+      }
+      if (prof.options.treatCallbackAsReturn && typeof(arguments[arguments.length-1])=='function') {
+        var origCallback = arguments[arguments.length-1];
+        arguments[arguments.length-1] = function() {
+          _end();
+          origCallback.apply(this, arguments);//this?
+        }
+      }
       var r = orig.apply(this, arguments);
-      var diff = process.hrtime(start);
+      _end();
 
-      var innerTime = prof.stack.pop()
-      prof.treetop = prof.treetop.__parent;
-      if (prof.running) {
-	      var totalTime = diff[0] * 1e9 + diff[1];
-
-	      prof.treetop[key].__calls++;  
-	      prof.treetop[key].__timeTotal+=totalTime;  
-	      
-	      prof.log[key].calls++;
-	      prof.log[key].timeTotal+= totalTime;
-	      prof.log[key].timeOwn+= totalTime - innerTime;
-	      if (prof.stack.length>0) prof.stack[prof.stack.length-1]+= totalTime;
-	    }
       return r;
     }
     obj[fn].orig = {obj:obj, name:fn, fn:orig};
