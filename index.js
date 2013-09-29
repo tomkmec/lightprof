@@ -29,11 +29,13 @@ Profiler.prototype.profile = function() {
     if(_.isObject(w)) prof._instances.push(w);
   });
 
-  _.each(prof._instances, prof._measure.bind(prof));
-  _.chain(prof._classes).pluck('prototype').each(prof._measure.bind(prof));
-  
   this.stack = [];
   this.treetop = this.treelog;
+  this.running = false;
+
+  _.each(prof._instances, prof._measure.bind(prof));
+  _.chain(prof._classes).pluck('prototype').each(prof._measure.bind(prof));
+
   this.running = !this.options.startPaused;
   this.totalTime = 0;
   this.startTime = this.running? process.hrtime() : false;
@@ -82,7 +84,7 @@ Profiler.prototype._measure = function(obj) {
     prof.log[key] = {calls:0, timeTotal:0, timeOwn:0}
     obj[fn] = function() {
       prof.stack.push(0);
-      if (!_.has(prof.treetop, key)) prof.treetop[key] = {__calls:0, __timeTotal:0, __parent: prof.treetop}
+      if (!prof.treetop[key]) prof.treetop[key] = {__calls:0, __timeTotal:0, __timeOwn:0, __parent: prof.treetop}
       prof.treetop = prof.treetop[key];
 
       var start = process.hrtime();
@@ -98,7 +100,8 @@ Profiler.prototype._measure = function(obj) {
           var totalTime = diff[0] * 1e9 + diff[1];
 
           prof.treetop[key].__calls++;  
-          prof.treetop[key].__timeTotal+=totalTime;  
+          prof.treetop[key].__timeTotal+= totalTime;  
+          prof.treetop[key].__timeOwn+= totalTime - innerTime;  
           
           prof.log[key].calls++;
           prof.log[key].timeTotal+= totalTime;
@@ -149,8 +152,9 @@ Profiler.prototype.reportPlain = function(options) {
         { timeOwn: pair[1].timeOwn/divs[options.timeUnit], timeTotal: pair[1].timeTotal/divs[options.timeUnit], calls: pair[1].calls }, 
         options.timeUnit) 
     })
-    .value()
-    return [options.format(false,false, options.timeUnit)].concat(rows).join('\n');
+    .value();
+  
+  return [options.format(false,false, options.timeUnit)].concat(rows).join('\n');
 }
 
 Profiler.prototype.reportTree = function(options) {
@@ -162,7 +166,7 @@ Profiler.prototype.reportTree = function(options) {
       if (!fn) return _.rpad("function", maxFnNameLength+1) + _.lpad("calls", 11)  + _.lpad("total time ["+timeUnit+"]", 20);
       else {
     	   var ascii = prefix + (lastChild?'\u2514':'\u251C');
-         return _.rpad(ascii+fn, maxFnNameLength) + _.lpad(record.calls, 11) + _.lpad(record.timeTotal, 20);
+         return _.rpad(ascii+fn, maxFnNameLength) + _.lpad(record.calls, 11) + _.lpad(record.timeTotal, 20)/* + _.lpad(record.timeOwn, 20)*/;
        }
     }
   });
@@ -175,7 +179,7 @@ Profiler.prototype.reportTree = function(options) {
       .map(function(p,i,l) {
         return [options.format(
           p[0], 
-          { timeTotal: p[1].__timeTotal/divs[options.timeUnit], calls: p[1].__calls },
+          { timeTotal: p[1].__timeTotal/divs[options.timeUnit], timeOwn: p[1].__timeOwn/divs[options.timeUnit], calls: p[1].__calls },
           options.timeUnit,
           prefix,
           i==0,
@@ -187,5 +191,40 @@ Profiler.prototype.reportTree = function(options) {
   }
 
   return [options.format(false,false, options.timeUnit)].concat(printLevel(this.treelog, '')).join('\n');
+
+}
+
+Profiler.prototype.reportHotspots = function(options) {
+  options = _.defaults(options || {}, {
+    timeUnit: 'ms', // s, ms, us, ns
+    rows: 10,
+    format: function(timeUnit, record) {
+      var maxFnNameLength = 40; //TODO
+      if (!record) return _.rpad("function", maxFnNameLength+1) + _.lpad("calls", 11)  + _.lpad("own time ["+timeUnit+"]", 20);
+      else {
+        var res = '';
+        for (var i=0; i<record.stack.length; i++) {
+          res += (i>0? (_.repeat(' ',i-1)+'\u2514') : '') + record.stack[i] + "\n";
+        }
+
+        return res + _.rpad((record.stack.length>0? (_.repeat(' ',record.stack.length-1)+'\u2514') : '') + record.fn, 40) + _.lpad(record.calls, 11) + _.lpad(record.time, 20)
+      }
+    }
+  });
+
+  var hotspots = [];
+  var sweep = function(root, stack) {
+    for (var key in root) if (key.indexOf('__') !== 0) {
+      hotspots.push({ fn: key, time: root[key].__timeOwn/divs[options.timeUnit], calls: root[key].__calls, stack: stack });
+      sweep(root[key], stack.concat([key]));
+    }
+  }
+
+  sweep(this.treelog, []);
+
+  hotspots = _.sortBy(hotspots, function(r) {return -r.time});
+
+  return [options.format(options.timeUnit)]
+    .concat(_.map(hotspots.slice(0,options.rows), function(r) {return options.format(options.timeUnit, r)})).join('\n');
 
 }
